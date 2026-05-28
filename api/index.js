@@ -10,7 +10,7 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.json({
     name: "Base Trend API",
-    status: "running",
+    status: "live",
     endpoint: "/trend/base"
   });
 });
@@ -24,7 +24,7 @@ app.get("/trend/base", async (req, res) => {
     );
 
     const responses = await Promise.all(requests);
-    const allPairs = responses.flatMap((response) => response.data.pairs || []);
+    const allPairs = responses.flatMap((r) => r.data.pairs || []);
 
     const uniqueTokens = new Map();
 
@@ -33,32 +33,40 @@ app.get("/trend/base", async (req, res) => {
       .filter((pair) => pair.volume?.h24 > 100)
       .forEach((pair) => {
         const symbol = pair.baseToken?.symbol;
-        const current = uniqueTokens.get(symbol);
 
-        if (!current || pair.volume?.h24 > current.volume?.h24) {
+        if (
+          !uniqueTokens.has(symbol) ||
+          pair.volume.h24 > uniqueTokens.get(symbol).volume.h24
+        ) {
           uniqueTokens.set(symbol, pair);
         }
       });
 
-    const pairs = Array.from(uniqueTokens.values())
+    const trending = Array.from(uniqueTokens.values())
       .sort((a, b) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0))
-      .slice(0, 10)
-      .map((pair) => ({
+      .slice(0, 5)
+      .map((pair, index) => ({
+        rank: index + 1,
         token: pair.baseToken?.name,
         symbol: pair.baseToken?.symbol,
         priceUsd: pair.priceUsd,
-        volume24h: pair.volume?.h24 || 0,
-        liquidityUsd: pair.liquidity?.usd || 0,
+        volume24h: Math.round(pair.volume?.h24 || 0),
+        liquidityUsd: Math.round(pair.liquidity?.usd || 0),
         dex: pair.dexId,
-        pairUrl: pair.url
+        url: pair.url
       }));
+
+    const topNarrative =
+      trending[0]?.symbol === "VIRTUAL"
+        ? "AI agent infrastructure continues dominating Base attention."
+        : "Meme and experimental agent coins remain active on Base.";
 
     res.json({
       ecosystem: "Base",
+      api: "Base Trend API",
       scanKeywords: keywords,
-      narrative:
-        "Base trend scan focused on AI agents, memes, Clanker-style launches, and onchain attention.",
-      trendingPairs: pairs,
+      topNarrative,
+      trending,
       updatedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -68,8 +76,4 @@ app.get("/trend/base", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Base Trend API running on port ${PORT}`);
-});
+module.exports = app;
