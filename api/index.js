@@ -12,6 +12,7 @@ app.get("/", (req, res) => {
     <html>
       <head>
         <title>Base Trend API</title>
+
         <style>
           body {
             background: #0a0a0a;
@@ -40,10 +41,8 @@ app.get("/", (req, res) => {
             text-decoration: none;
           }
 
-          code {
-            background: #1f2937;
-            padding: 2px 6px;
-            border-radius: 6px;
+          li {
+            margin-bottom: 10px;
           }
         </style>
       </head>
@@ -59,17 +58,12 @@ app.get("/", (req, res) => {
         <div class="box">
           <h2>Endpoints</h2>
 
-          <p>
-            <a href="/trend/base">/trend/base</a>
-          </p>
-
-          <p>
-            <a href="/trend/summary">/trend/summary</a>
-          </p>
-
-          <p>
-            <a href="/agent/feed">/agent/feed</a>
-          </p>
+          <ul>
+            <li><a href="/trend/base">/trend/base</a></li>
+            <li><a href="/trend/summary">/trend/summary</a></li>
+            <li><a href="/agent/feed">/agent/feed</a></li>
+            <li><a href="/trend/bullish">/trend/bullish</a></li>
+          </ul>
         </div>
 
         <div class="box">
@@ -80,6 +74,7 @@ app.get("/", (req, res) => {
             <li>Autonomous trading feeds</li>
             <li>Base ecosystem monitoring</li>
             <li>Crypto narrative tracking</li>
+            <li>Bullish token filtering</li>
           </ul>
         </div>
 
@@ -111,28 +106,32 @@ async function getBaseTrends() {
     .filter((pair) => pair.volume?.h24 > 100)
     .forEach((pair) => {
       const symbol = pair.baseToken?.symbol;
+
       if (!symbol) return;
 
       if (
         !uniqueTokens.has(symbol) ||
-        pair.volume.h24 > uniqueTokens.get(symbol).volume.h24
+        pair.volume.h24 > uniqueTokens.get(symbol).volume24h
       ) {
-        uniqueTokens.set(symbol, pair);
+        uniqueTokens.set(symbol, {
+          rank: 0,
+          token: pair.baseToken?.name,
+          symbol: pair.baseToken?.symbol,
+          priceUsd: pair.priceUsd,
+          volume24h: Math.round(pair.volume?.h24 || 0),
+          liquidityUsd: Math.round(pair.liquidity?.usd || 0),
+          dex: pair.dexId,
+          url: pair.url
+        });
       }
     });
 
   const trending = Array.from(uniqueTokens.values())
-    .sort((a, b) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0))
+    .sort((a, b) => b.volume24h - a.volume24h)
     .slice(0, 5)
-    .map((pair, index) => ({
-      rank: index + 1,
-      token: pair.baseToken?.name,
-      symbol: pair.baseToken?.symbol,
-      priceUsd: pair.priceUsd,
-      volume24h: Math.round(pair.volume?.h24 || 0),
-      liquidityUsd: Math.round(pair.liquidity?.usd || 0),
-      dex: pair.dexId,
-      url: pair.url
+    .map((token, index) => ({
+      ...token,
+      rank: index + 1
     }));
 
   return {
@@ -151,7 +150,7 @@ app.get("/trend/base", async (req, res) => {
     const topNarrative =
       data.trending[0]?.symbol === "VIRTUAL"
         ? "AI agent infrastructure continues dominating Base attention."
-        : "Meme and experimental agent coins remain active on Base.";
+        : "Experimental Base narratives remain active.";
 
     res.json({
       ...data,
@@ -169,6 +168,7 @@ app.get("/trend/summary", async (req, res) => {
     const data = await getBaseTrends();
 
     const hotTokens = data.trending.map((item) => item.symbol);
+
     const totalVolume24h = data.trending.reduce(
       (sum, item) => sum + item.volume24h,
       0
@@ -204,6 +204,7 @@ app.get("/agent/feed", async (req, res) => {
     const data = await getBaseTrends();
 
     const hotTokens = data.trending.map((item) => item.symbol);
+
     const totalVolume24h = data.trending.reduce(
       (sum, item) => sum + item.volume24h,
       0
@@ -220,6 +221,34 @@ This feed is generated from live Base DEX activity across AI, agent, meme, virtu
     res.type("text/plain").send(feed);
   } catch (error) {
     res.status(500).send("failed to generate agent feed");
+  }
+});
+
+app.get("/trend/bullish", async (req, res) => {
+  try {
+    const data = await getBaseTrends();
+
+    const bullishTokens = data.trending
+      .filter((token) => token.volume24h > 50000)
+      .filter((token) => token.liquidityUsd > 50000)
+      .map((token) => ({
+        symbol: token.symbol,
+        volume24h: token.volume24h,
+        liquidityUsd: token.liquidityUsd,
+        dex: token.dex,
+        conviction:
+          token.volume24h > 1000000 ? "very high" : "high"
+      }));
+
+    res.json({
+      ecosystem: "Base",
+      bullishTokens,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "failed to generate bullish trends"
+    });
   }
 });
 
