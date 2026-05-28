@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 
-const { paymentMiddleware } = require("x402-express");
+const { paymentMiddleware } = require("x402");
 
 const app = express();
 
