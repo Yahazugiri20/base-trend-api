@@ -2,10 +2,26 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 
+const { paymentMiddleware } = require("x402-express");
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+app.use(
+  paymentMiddleware({
+    receiver:
+      "0x000000000000000000000000000000000000dead",
+
+    routes: {
+      "/trend/report": {
+        price: "$0.001",
+        network: "base-sepolia"
+      }
+    }
+  })
+);
 
 app.get("/", (req, res) => {
   res.send(`
@@ -47,8 +63,7 @@ app.get("/", (req, res) => {
       <h1>Base Trend API</h1>
 
       <p>
-        Live Base ecosystem trend scanning API focused on AI agents,
-        memes, virtual protocols, and clanker-related activity.
+        AI agent market intelligence API for Base ecosystem activity.
       </p>
 
       <div class="box">
@@ -59,15 +74,8 @@ app.get("/", (req, res) => {
           <li><a href="/trend/summary">/trend/summary</a></li>
           <li><a href="/agent/feed">/agent/feed</a></li>
           <li><a href="/trend/bullish">/trend/bullish</a></li>
-          <li><a href="/trend/report">/trend/report</a></li>
+          <li><a href="/trend/report">/trend/report (x402 protected)</a></li>
         </ul>
-      </div>
-
-      <div class="box">
-        <h2>Status</h2>
-
-        <p>Live on Vercel serverless infrastructure.</p>
-        <p>Powered by Dexscreener market data.</p>
       </div>
     </body>
   </html>
@@ -119,161 +127,73 @@ async function getBaseTrends() {
 }
 
 app.get("/trend/base", async (req, res) => {
-  try {
-    const trending = await getBaseTrends();
+  const trending = await getBaseTrends();
 
-    res.json({
-      ecosystem: "Base",
-      topNarrative:
-        trending[0]?.symbol === "VIRTUAL"
-          ? "AI agent infrastructure continues dominating Base attention."
-          : "Experimental Base narratives remain active.",
-      trending,
-      updatedAt: new Date().toISOString()
-    });
-  } catch {
-    res.status(500).json({
-      error: "failed to fetch Base trends"
-    });
-  }
+  res.json({
+    ecosystem: "Base",
+    trending,
+    updatedAt: new Date().toISOString()
+  });
 });
 
 app.get("/trend/summary", async (req, res) => {
-  try {
-    const trending = await getBaseTrends();
+  const trending = await getBaseTrends();
 
-    const hotTokens = trending.map((t) => t.symbol);
+  const hotTokens = trending.map((t) => t.symbol);
 
-    const totalVolume24h = trending.reduce(
-      (sum, t) => sum + t.volume24h,
-      0
-    );
-
-    res.json({
-      ecosystem: "Base",
-      marketMood:
-        totalVolume24h > 1000000 ? "high attention" : "early activity",
-      dominantNarrative: hotTokens.includes("VIRTUAL")
-        ? "AI agent infrastructure"
-        : "experimental Base narratives",
-      hotTokens,
-      totalTrackedVolume24h: totalVolume24h,
-      updatedAt: new Date().toISOString()
-    });
-  } catch {
-    res.status(500).json({
-      error: "failed to generate summary"
-    });
-  }
+  res.json({
+    ecosystem: "Base",
+    dominantNarrative: "AI agent infrastructure",
+    hotTokens,
+    updatedAt: new Date().toISOString()
+  });
 });
 
 app.get("/agent/feed", async (req, res) => {
-  try {
-    const trending = await getBaseTrends();
+  const trending = await getBaseTrends();
 
-    const topThree = trending
-      .slice(0, 3)
-      .map((t) => t.symbol)
-      .join(", ");
+  const topThree = trending
+    .slice(0, 3)
+    .map((t) => t.symbol)
+    .join(", ");
 
-    const totalVolume24h = trending.reduce(
-      (sum, t) => sum + t.volume24h,
-      0
-    );
-
-    res.type("text/plain").send(`
+  res.type("text/plain").send(`
 Base market update:
-
-AI agent infrastructure remains dominant on Base.
 
 Top tracked tokens:
 ${topThree}
 
-Tracked 24h volume:
-$${totalVolume24h.toLocaleString()}
-
-Generated from live Dexscreener Base activity.
-    `);
-  } catch {
-    res.status(500).send("failed to generate agent feed");
-  }
+Generated from live Base activity.
+  `);
 });
 
 app.get("/trend/bullish", async (req, res) => {
-  try {
-    const trending = await getBaseTrends();
+  const trending = await getBaseTrends();
 
-    const bullishTokens = trending
-      .filter((t) => t.volume24h > 50000)
-      .filter((t) => t.liquidityUsd > 50000)
-      .map((t) => ({
-        symbol: t.symbol,
-        volume24h: t.volume24h,
-        liquidityUsd: t.liquidityUsd,
-        conviction:
-          t.volume24h > 1000000 ? "very high" : "high"
-      }));
+  const bullishTokens = trending
+    .filter((t) => t.volume24h > 50000)
+    .map((t) => ({
+      symbol: t.symbol,
+      volume24h: t.volume24h,
+      liquidityUsd: t.liquidityUsd
+    }));
 
-    res.json({
-      ecosystem: "Base",
-      bullishTokens,
-      generatedAt: new Date().toISOString()
-    });
-  } catch {
-    res.status(500).json({
-      error: "failed to generate bullish trends"
-    });
-  }
+  res.json({
+    ecosystem: "Base",
+    bullishTokens,
+    generatedAt: new Date().toISOString()
+  });
 });
 
 app.get("/trend/report", async (req, res) => {
-  try {
-    const trending = await getBaseTrends();
+  const trending = await getBaseTrends();
 
-    const totalVolume24h = trending.reduce(
-      (sum, t) => sum + t.volume24h,
-      0
-    );
-
-    const bullishTokens = trending
-      .filter((t) => t.volume24h > 50000)
-      .map((t) => t.symbol);
-
-    res.json({
-      ecosystem: "Base",
-      report: {
-        marketMood:
-          totalVolume24h > 1000000
-            ? "high attention"
-            : "early activity",
-
-        dominantNarrative:
-          bullishTokens.includes("VIRTUAL")
-            ? "AI agent infrastructure"
-            : "experimental Base narratives",
-
-        topTokens: bullishTokens,
-
-        risks: [
-          "high volatility",
-          "rapid narrative rotation",
-          "low cap liquidity risk"
-        ],
-
-        totalTrackedVolume24h: totalVolume24h,
-
-        generatedFeed: `Base activity is currently dominated by ${bullishTokens.join(
-          ", "
-        )}. AI agent narratives remain the strongest sector on tracked Base pairs.`
-      },
-
-      updatedAt: new Date().toISOString()
-    });
-  } catch {
-    res.status(500).json({
-      error: "failed to generate report"
-    });
-  }
+  res.json({
+    ecosystem: "Base",
+    report: trending,
+    premium: true,
+    updatedAt: new Date().toISOString()
+  });
 });
 
 module.exports = app;
