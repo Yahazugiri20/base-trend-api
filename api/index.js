@@ -13,7 +13,8 @@ app.get("/", (req, res) => {
     status: "live",
     endpoints: {
       baseTrend: "/trend/base",
-      summary: "/trend/summary"
+      summary: "/trend/summary",
+      agentFeed: "/agent/feed"
     }
   });
 });
@@ -120,6 +121,30 @@ app.get("/trend/summary", async (req, res) => {
     res.status(500).json({
       error: "failed to generate Base trend summary"
     });
+  }
+});
+
+app.get("/agent/feed", async (req, res) => {
+  try {
+    const data = await getBaseTrends();
+
+    const hotTokens = data.trending.map((item) => item.symbol);
+    const totalVolume24h = data.trending.reduce(
+      (sum, item) => sum + item.volume24h,
+      0
+    );
+
+    const topThree = hotTokens.slice(0, 3).join(", ");
+
+    const feed = `Base market update:
+AI agent infrastructure is currently the dominant narrative.
+Top tracked tokens: ${topThree}.
+Tracked 24h volume: $${totalVolume24h.toLocaleString()}.
+This feed is generated from live Base DEX activity across AI, agent, meme, virtual, and clanker-related pairs.`;
+
+    res.type("text/plain").send(feed);
+  } catch (error) {
+    res.status(500).send("failed to generate agent feed");
   }
 });
 
