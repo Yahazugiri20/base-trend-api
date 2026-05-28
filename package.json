@@ -10,6 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@x402/core": "^2.13.0",
+    "@x402/evm": "^2.13.0",
+    "@x402/express": "^2.13.0",
     "axios": "^1.16.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
