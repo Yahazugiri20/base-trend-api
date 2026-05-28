@@ -7,53 +7,32 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const GT = "https://api.geckoterminal.com/api/v2";
+
 app.get("/", (req, res) => {
   res.send(`
   <html>
     <head>
-      <title>Base Trend API</title>
-
+      <title>Base Signal API</title>
       <style>
-        body {
-          background: #0a0a0a;
-          color: white;
-          font-family: Arial, sans-serif;
-          padding: 40px;
-          max-width: 900px;
-          margin: auto;
-        }
-
-        h1 {
-          color: #4da2ff;
-          font-size: 48px;
-        }
-
-        .box {
-          background: #111827;
-          border: 1px solid #1f2937;
-          padding: 20px;
-          border-radius: 16px;
-          margin-top: 20px;
-        }
-
-        a {
-          color: #60a5fa;
-          text-decoration: none;
-        }
+        body { background:#050505; color:white; font-family:Arial,sans-serif; padding:40px; max-width:900px; margin:auto; }
+        h1 { color:#4da2ff; font-size:48px; }
+        .box { background:#111827; border:1px solid #1f2937; padding:20px; border-radius:16px; margin-top:20px; }
+        a { color:#60a5fa; text-decoration:none; }
+        li { margin-bottom:10px; }
       </style>
     </head>
-
     <body>
-      <h1>Base Trend API</h1>
+      <h1>Base Signal API</h1>
+      <p>Real Base DEX signal API powered by GeckoTerminal data.</p>
 
       <div class="box">
         <h2>Endpoints</h2>
-
         <ul>
-          <li><a href="/trend/base">/trend/base</a></li>
-          <li><a href="/trend/new">/trend/new</a></li>
-          <li><a href="/trend/bullish">/trend/bullish</a></li>
-          <li><a href="/trend/report">/trend/report</a></li>
+          <li><a href="/trend/base">/trend/base</a> — real trending pools</li>
+          <li><a href="/trend/new">/trend/new</a> — newest Base pools</li>
+          <li><a href="/trend/momentum">/trend/momentum</a> — scored momentum signals</li>
+          <li><a href="/trend/report">/trend/report</a> — compact paid-style report</li>
         </ul>
       </div>
     </body>
@@ -61,138 +40,258 @@ app.get("/", (req, res) => {
   `);
 });
 
-async function fetchPairs() {
-  const response = await axios.get(
-    "https://api.dexscreener.com/latest/dex/pairs/base"
-  );
+async function gt(path) {
+  const res = await axios.get(`${GT}${path}`, {
+    timeout: 12000,
+    headers: {
+      accept: "application/json"
+    }
+  });
 
-  return response.data.pairs || [];
+  return res.data;
 }
 
-function cleanPairs(pairs) {
-  const seen = new Set();
+function buildIncludedMap(included = []) {
+  const map = new Map();
 
-  return pairs
-    .filter((p) => p.chainId === "base")
-    .filter((p) => p.volume?.h24 > 500)
-    .filter((p) => p.liquidity?.usd > 1000)
-    .filter((p) => {
-      if (seen.has(p.baseToken.symbol)) {
-        return false;
-      }
+  for (const item of included) {
+    map.set(item.id, {
+      id: item.id,
+      type: item.type,
+      ...item.attributes
+    });
+  }
 
-      seen.add(p.baseToken.symbol);
-      return true;
-    })
-    .map((p) => ({
-      token: p.baseToken.name,
-      symbol: p.baseToken.symbol,
-      priceUsd: p.priceUsd,
-      volume24h: Math.round(p.volume?.h24 || 0),
-      liquidityUsd: Math.round(p.liquidity?.usd || 0),
-      txns24h: p.txns?.h24?.buys + p.txns?.h24?.sells || 0,
-      pairCreatedAt: p.pairCreatedAt,
-      dex: p.dexId,
-      url: p.url
-    }));
+  return map;
+}
+
+function getRel(item, includedMap, relName) {
+  const id = item.relationships?.[relName]?.data?.id;
+  return id ? includedMap.get(id) : null;
+}
+
+function normalizePools(payload) {
+  const includedMap = buildIncludedMap(payload.included || []);
+
+  return (payload.data || []).map((item) => {
+    const a = item.attributes || {};
+    const baseToken = getRel(item, includedMap, "base_token");
+    const quoteToken = getRel(item, includedMap, "quote_token");
+    const dex = getRel(item, includedMap, "dex");
+
+    const volume1h = Number(a.volume_usd?.h1 || 0);
+    const volume6h = Number(a.volume_usd?.h6 || 0);
+    const volume24h = Number(a.volume_usd?.h24 || 0);
+
+    const buys1h = Number(a.transactions?.h1?.buys || 0);
+    const sells1h = Number(a.transactions?.h1?.sells || 0);
+    const buys24h = Number(a.transactions?.h24?.buys || 0);
+    const sells24h = Number(a.transactions?.h24?.sells || 0);
+
+    const txns1h = buys1h + sells1h;
+    const txns24h = buys24h + sells24h;
+
+    const liquidityUsd = Number(a.reserve_in_usd || 0);
+
+    const priceChange1h = Number(a.price_change_percentage?.h1 || 0);
+    const priceChange24h = Number(a.price_change_percentage?.h24 || 0);
+
+    const createdAt = a.pool_created_at
+      ? new Date(a.pool_created_at).getTime()
+      : 0;
+
+    const ageMinutes = createdAt
+      ? Math.max(0, Math.round((Date.now() - createdAt) / 60000))
+      : null;
+
+    const momentumScore =
+      volume1h * 0.4 +
+      volume6h * 0.2 +
+      txns1h * 30 +
+      buys1h * 20 +
+      liquidityUsd * 0.03 +
+      priceChange1h * 500;
+
+    return {
+      poolAddress: item.attributes?.address,
+      poolName: a.name,
+      baseToken: baseToken?.name || null,
+      baseSymbol: baseToken?.symbol || null,
+      quoteToken: quoteToken?.name || null,
+      quoteSymbol: quoteToken?.symbol || null,
+      dex: dex?.name || null,
+      priceUsd: a.base_token_price_usd || null,
+      liquidityUsd: Math.round(liquidityUsd),
+      volume1h: Math.round(volume1h),
+      volume6h: Math.round(volume6h),
+      volume24h: Math.round(volume24h),
+      txns1h,
+      txns24h,
+      buys1h,
+      sells1h,
+      buys24h,
+      sells24h,
+      priceChange1h,
+      priceChange24h,
+      ageMinutes,
+      poolCreatedAt: a.pool_created_at,
+      geckoUrl: `https://www.geckoterminal.com/base/pools/${a.address}`,
+      score: Math.round(momentumScore)
+    };
+  });
+}
+
+function cleanSignals(pools) {
+  return pools
+    .filter((p) => p.baseSymbol)
+    .filter((p) => p.liquidityUsd >= 1000)
+    .filter((p) => p.volume24h >= 1000)
+    .filter((p) => p.txns24h >= 5);
 }
 
 app.get("/trend/base", async (req, res) => {
   try {
-    const rawPairs = await fetchPairs();
+    const payload = await gt(
+      "/networks/base/trending_pools?include=base_token,quote_token,dex"
+    );
 
-    const trending = cleanPairs(rawPairs)
-      .sort((a, b) => b.volume24h - a.volume24h)
-      .slice(0, 10);
+    const pools = cleanSignals(normalizePools(payload))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20);
 
     res.json({
-      ecosystem: "Base",
-      type: "live trends",
-      trending,
+      source: "GeckoTerminal",
+      network: "base",
+      type: "real trending pools",
+      count: pools.length,
+      pools,
       updatedAt: new Date().toISOString()
     });
-  } catch {
+  } catch (err) {
     res.status(500).json({
-      error: "failed to fetch trends"
+      error: "failed to fetch GeckoTerminal trending pools",
+      detail: err.response?.data || err.message
     });
   }
 });
 
 app.get("/trend/new", async (req, res) => {
   try {
-    const rawPairs = await fetchPairs();
+    const payload = await gt(
+      "/networks/base/new_pools?include=base_token,quote_token,dex"
+    );
 
-    const newest = cleanPairs(rawPairs)
-      .sort((a, b) => b.pairCreatedAt - a.pairCreatedAt)
-      .slice(0, 10);
+    const pools = normalizePools(payload)
+      .filter((p) => p.baseSymbol)
+      .filter((p) => p.ageMinutes !== null)
+      .sort((a, b) => a.ageMinutes - b.ageMinutes)
+      .slice(0, 20);
 
     res.json({
-      ecosystem: "Base",
-      type: "new pairs",
-      newest,
+      source: "GeckoTerminal",
+      network: "base",
+      type: "newest pools",
+      count: pools.length,
+      pools,
       updatedAt: new Date().toISOString()
     });
-  } catch {
+  } catch (err) {
     res.status(500).json({
-      error: "failed to fetch new pairs"
+      error: "failed to fetch GeckoTerminal new pools",
+      detail: err.response?.data || err.message
     });
   }
 });
 
-app.get("/trend/bullish", async (req, res) => {
+app.get("/trend/momentum", async (req, res) => {
   try {
-    const rawPairs = await fetchPairs();
+    const [trendingPayload, topPayload, newPayload] = await Promise.all([
+      gt("/networks/base/trending_pools?include=base_token,quote_token,dex"),
+      gt("/networks/base/pools?include=base_token,quote_token,dex"),
+      gt("/networks/base/new_pools?include=base_token,quote_token,dex")
+    ]);
 
-    const bullish = cleanPairs(rawPairs)
-      .filter((p) => p.volume24h > 50000)
-      .filter((p) => p.liquidityUsd > 25000)
-      .sort((a, b) => b.txns24h - a.txns24h)
-      .slice(0, 10);
+    const merged = [
+      ...normalizePools(trendingPayload),
+      ...normalizePools(topPayload),
+      ...normalizePools(newPayload)
+    ];
+
+    const unique = new Map();
+
+    for (const p of merged) {
+      if (!p.poolAddress) continue;
+
+      const old = unique.get(p.poolAddress);
+
+      if (!old || p.score > old.score) {
+        unique.set(p.poolAddress, p);
+      }
+    }
+
+    const signals = cleanSignals(Array.from(unique.values()))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20);
 
     res.json({
-      ecosystem: "Base",
-      type: "bullish momentum",
-      bullish,
+      source: "GeckoTerminal",
+      network: "base",
+      type: "momentum scored pools",
+      scoring:
+        "score uses 1h volume, 6h volume, 1h transactions, 1h buys, liquidity, and 1h price change",
+      count: signals.length,
+      signals,
       updatedAt: new Date().toISOString()
     });
-  } catch {
+  } catch (err) {
     res.status(500).json({
-      error: "failed to fetch bullish tokens"
+      error: "failed to generate momentum signals",
+      detail: err.response?.data || err.message
     });
   }
 });
 
 app.get("/trend/report", async (req, res) => {
   try {
-    const rawPairs = await fetchPairs();
+    const payload = await gt(
+      "/networks/base/trending_pools?include=base_token,quote_token,dex"
+    );
 
-    const bullish = cleanPairs(rawPairs)
-      .filter((p) => p.volume24h > 50000)
-      .slice(0, 5);
+    const signals = cleanSignals(normalizePools(payload))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
 
-    const report = {
-      dominantNarrative:
-        bullish[0]?.symbol === "VIRTUAL"
-          ? "AI agent infrastructure"
-          : "experimental Base activity",
-
-      hottestTokens: bullish.map((p) => p.symbol),
-
-      summary: `${bullish
-        .map((p) => p.symbol)
-        .join(", ")} currently lead Base onchain attention.`,
-
-      riskLevel: "high volatility"
-    };
+    const top = signals.slice(0, 5);
 
     res.json({
-      ecosystem: "Base",
-      report,
+      source: "GeckoTerminal",
+      network: "base",
+      report: {
+        marketMode: "real GeckoTerminal Base pool scan",
+        topSignals: top.map((p) => ({
+          symbol: p.baseSymbol,
+          pool: p.poolName,
+          dex: p.dex,
+          liquidityUsd: p.liquidityUsd,
+          volume1h: p.volume1h,
+          volume24h: p.volume24h,
+          txns1h: p.txns1h,
+          priceChange1h: p.priceChange1h,
+          score: p.score,
+          url: p.geckoUrl
+        })),
+        riskNotes: [
+          "not financial advice",
+          "low liquidity pools can be highly volatile",
+          "signals are based on public GeckoTerminal pool data"
+        ]
+      },
       updatedAt: new Date().toISOString()
     });
-  } catch {
+  } catch (err) {
     res.status(500).json({
-      error: "failed to generate report"
+      error: "failed to generate report",
+      detail: err.response?.data || err.message
     });
   }
 });
