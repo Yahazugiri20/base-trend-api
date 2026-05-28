@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: base-trend-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start
