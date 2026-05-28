@@ -8,15 +8,90 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.json({
-    name: "Base Trend API",
-    status: "live",
-    endpoints: {
-      baseTrend: "/trend/base",
-      summary: "/trend/summary",
-      agentFeed: "/agent/feed"
-    }
-  });
+  res.send(`
+    <html>
+      <head>
+        <title>Base Trend API</title>
+        <style>
+          body {
+            background: #0a0a0a;
+            color: white;
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            max-width: 900px;
+            margin: auto;
+          }
+
+          h1 {
+            color: #4da2ff;
+            font-size: 48px;
+          }
+
+          .box {
+            background: #111827;
+            border: 1px solid #1f2937;
+            padding: 20px;
+            border-radius: 16px;
+            margin-top: 20px;
+          }
+
+          a {
+            color: #60a5fa;
+            text-decoration: none;
+          }
+
+          code {
+            background: #1f2937;
+            padding: 2px 6px;
+            border-radius: 6px;
+          }
+        </style>
+      </head>
+
+      <body>
+        <h1>Base Trend API</h1>
+
+        <p>
+          Live Base ecosystem trend scanning API focused on AI agents,
+          memes, virtual protocols, and clanker-related activity.
+        </p>
+
+        <div class="box">
+          <h2>Endpoints</h2>
+
+          <p>
+            <a href="/trend/base">/trend/base</a>
+          </p>
+
+          <p>
+            <a href="/trend/summary">/trend/summary</a>
+          </p>
+
+          <p>
+            <a href="/agent/feed">/agent/feed</a>
+          </p>
+        </div>
+
+        <div class="box">
+          <h2>Example Use Cases</h2>
+
+          <ul>
+            <li>AI agent market context</li>
+            <li>Autonomous trading feeds</li>
+            <li>Base ecosystem monitoring</li>
+            <li>Crypto narrative tracking</li>
+          </ul>
+        </div>
+
+        <div class="box">
+          <h2>Status</h2>
+
+          <p>Live on Vercel serverless infrastructure.</p>
+          <p>Powered by Dexscreener market data.</p>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
 async function getBaseTrends() {
