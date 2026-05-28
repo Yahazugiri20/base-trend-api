@@ -2,26 +2,10 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 
-const { paymentMiddleware } = require("x402");
-
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-app.use(
-  paymentMiddleware({
-    receiver:
-      "0x000000000000000000000000000000000000dead",
-
-    routes: {
-      "/trend/report": {
-        price: "$0.001",
-        network: "base-sepolia"
-      }
-    }
-  })
-);
 
 app.get("/", (req, res) => {
   res.send(`
@@ -62,19 +46,14 @@ app.get("/", (req, res) => {
     <body>
       <h1>Base Trend API</h1>
 
-      <p>
-        AI agent market intelligence API for Base ecosystem activity.
-      </p>
-
       <div class="box">
         <h2>Endpoints</h2>
 
         <ul>
           <li><a href="/trend/base">/trend/base</a></li>
-          <li><a href="/trend/summary">/trend/summary</a></li>
-          <li><a href="/agent/feed">/agent/feed</a></li>
+          <li><a href="/trend/new">/trend/new</a></li>
           <li><a href="/trend/bullish">/trend/bullish</a></li>
-          <li><a href="/trend/report">/trend/report (x402 protected)</a></li>
+          <li><a href="/trend/report">/trend/report</a></li>
         </ul>
       </div>
     </body>
@@ -82,118 +61,140 @@ app.get("/", (req, res) => {
   `);
 });
 
-async function getBaseTrends() {
-  const keywords = ["ai", "agent", "meme", "virtual", "clanker"];
-
-  const requests = keywords.map((keyword) =>
-    axios.get(`https://api.dexscreener.com/latest/dex/search?q=${keyword}`)
+async function fetchPairs() {
+  const response = await axios.get(
+    "https://api.dexscreener.com/latest/dex/pairs/base"
   );
 
-  const responses = await Promise.all(requests);
-  const allPairs = responses.flatMap((r) => r.data.pairs || []);
+  return response.data.pairs || [];
+}
 
-  const uniqueTokens = new Map();
+function cleanPairs(pairs) {
+  const seen = new Set();
 
-  allPairs
-    .filter((pair) => pair.chainId === "base")
-    .filter((pair) => pair.volume?.h24 > 100)
-    .forEach((pair) => {
-      const symbol = pair.baseToken?.symbol;
-
-      if (!symbol) return;
-
-      const existing = uniqueTokens.get(symbol);
-
-      if (!existing || pair.volume.h24 > existing.volume24h) {
-        uniqueTokens.set(symbol, {
-          token: pair.baseToken?.name,
-          symbol: pair.baseToken?.symbol,
-          priceUsd: pair.priceUsd,
-          volume24h: Math.round(pair.volume?.h24 || 0),
-          liquidityUsd: Math.round(pair.liquidity?.usd || 0),
-          dex: pair.dexId,
-          url: pair.url
-        });
+  return pairs
+    .filter((p) => p.chainId === "base")
+    .filter((p) => p.volume?.h24 > 500)
+    .filter((p) => p.liquidity?.usd > 1000)
+    .filter((p) => {
+      if (seen.has(p.baseToken.symbol)) {
+        return false;
       }
-    });
 
-  return Array.from(uniqueTokens.values())
-    .sort((a, b) => b.volume24h - a.volume24h)
-    .slice(0, 5)
-    .map((token, index) => ({
-      rank: index + 1,
-      ...token
+      seen.add(p.baseToken.symbol);
+      return true;
+    })
+    .map((p) => ({
+      token: p.baseToken.name,
+      symbol: p.baseToken.symbol,
+      priceUsd: p.priceUsd,
+      volume24h: Math.round(p.volume?.h24 || 0),
+      liquidityUsd: Math.round(p.liquidity?.usd || 0),
+      txns24h: p.txns?.h24?.buys + p.txns?.h24?.sells || 0,
+      pairCreatedAt: p.pairCreatedAt,
+      dex: p.dexId,
+      url: p.url
     }));
 }
 
 app.get("/trend/base", async (req, res) => {
-  const trending = await getBaseTrends();
+  try {
+    const rawPairs = await fetchPairs();
 
-  res.json({
-    ecosystem: "Base",
-    trending,
-    updatedAt: new Date().toISOString()
-  });
+    const trending = cleanPairs(rawPairs)
+      .sort((a, b) => b.volume24h - a.volume24h)
+      .slice(0, 10);
+
+    res.json({
+      ecosystem: "Base",
+      type: "live trends",
+      trending,
+      updatedAt: new Date().toISOString()
+    });
+  } catch {
+    res.status(500).json({
+      error: "failed to fetch trends"
+    });
+  }
 });
 
-app.get("/trend/summary", async (req, res) => {
-  const trending = await getBaseTrends();
+app.get("/trend/new", async (req, res) => {
+  try {
+    const rawPairs = await fetchPairs();
 
-  const hotTokens = trending.map((t) => t.symbol);
+    const newest = cleanPairs(rawPairs)
+      .sort((a, b) => b.pairCreatedAt - a.pairCreatedAt)
+      .slice(0, 10);
 
-  res.json({
-    ecosystem: "Base",
-    dominantNarrative: "AI agent infrastructure",
-    hotTokens,
-    updatedAt: new Date().toISOString()
-  });
-});
-
-app.get("/agent/feed", async (req, res) => {
-  const trending = await getBaseTrends();
-
-  const topThree = trending
-    .slice(0, 3)
-    .map((t) => t.symbol)
-    .join(", ");
-
-  res.type("text/plain").send(`
-Base market update:
-
-Top tracked tokens:
-${topThree}
-
-Generated from live Base activity.
-  `);
+    res.json({
+      ecosystem: "Base",
+      type: "new pairs",
+      newest,
+      updatedAt: new Date().toISOString()
+    });
+  } catch {
+    res.status(500).json({
+      error: "failed to fetch new pairs"
+    });
+  }
 });
 
 app.get("/trend/bullish", async (req, res) => {
-  const trending = await getBaseTrends();
+  try {
+    const rawPairs = await fetchPairs();
 
-  const bullishTokens = trending
-    .filter((t) => t.volume24h > 50000)
-    .map((t) => ({
-      symbol: t.symbol,
-      volume24h: t.volume24h,
-      liquidityUsd: t.liquidityUsd
-    }));
+    const bullish = cleanPairs(rawPairs)
+      .filter((p) => p.volume24h > 50000)
+      .filter((p) => p.liquidityUsd > 25000)
+      .sort((a, b) => b.txns24h - a.txns24h)
+      .slice(0, 10);
 
-  res.json({
-    ecosystem: "Base",
-    bullishTokens,
-    generatedAt: new Date().toISOString()
-  });
+    res.json({
+      ecosystem: "Base",
+      type: "bullish momentum",
+      bullish,
+      updatedAt: new Date().toISOString()
+    });
+  } catch {
+    res.status(500).json({
+      error: "failed to fetch bullish tokens"
+    });
+  }
 });
 
 app.get("/trend/report", async (req, res) => {
-  const trending = await getBaseTrends();
+  try {
+    const rawPairs = await fetchPairs();
 
-  res.json({
-    ecosystem: "Base",
-    report: trending,
-    premium: true,
-    updatedAt: new Date().toISOString()
-  });
+    const bullish = cleanPairs(rawPairs)
+      .filter((p) => p.volume24h > 50000)
+      .slice(0, 5);
+
+    const report = {
+      dominantNarrative:
+        bullish[0]?.symbol === "VIRTUAL"
+          ? "AI agent infrastructure"
+          : "experimental Base activity",
+
+      hottestTokens: bullish.map((p) => p.symbol),
+
+      summary: `${bullish
+        .map((p) => p.symbol)
+        .join(", ")} currently lead Base onchain attention.`,
+
+      riskLevel: "high volatility"
+    };
+
+    res.json({
+      ecosystem: "Base",
+      report,
+      updatedAt: new Date().toISOString()
+    });
+  } catch {
+    res.status(500).json({
+      error: "failed to generate report"
+    });
+  }
 });
 
 module.exports = app;
